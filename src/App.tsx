@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { formatBytes, optimizeImage } from './lib/optimizeImage'
 import type { ImagePreset, OptimizedImage } from './lib/optimizeImage'
-import { canSetupAdmin, clearStoredSession, deleteBannerRemote, deletePropertyRemote, deleteUploadedImageRemote, getAdminContent, getStoredSession, hasAdminAccount, isConvexReady, loginAdmin, logoutAdmin, saveBannerRemote, savePropertyRemote, saveSettingsRemote, setupAdminAccount, uploadOptimizedImage } from './lib/convexContent'
+import { canSetupAdmin, clearStoredSession, deleteBannerRemote, deletePropertyRemote, deleteUploadedImageRemote, getAdminContent, getStoredSession, hasAdminAccount, isConvexReady, loginAdmin, logoutAdmin, resetAdminAccountPassword, saveBannerRemote, savePropertyRemote, saveSettingsRemote, setupAdminAccount, uploadOptimizedImage } from './lib/convexContent'
 import './App.css'
 
 type Tab = 'dashboard' | 'properties' | 'banners' | 'settings'
@@ -165,19 +165,21 @@ function AuthShell({ children }: { children: React.ReactNode }) {
 function AuthScreen({ mode, initialEmail, onAuthenticated, onSetupComplete }: { mode: 'setup' | 'login'; initialEmail: string; onAuthenticated: (email: string) => void; onSetupComplete: () => void }) {
   const [email, setEmail] = useState(initialEmail), [password, setPassword] = useState(''), [confirmation, setConfirmation] = useState('')
   const [error, setError] = useState(''), [busy, setBusy] = useState(false)
-  const isSetup = mode === 'setup'
+  const [resetMode, setResetMode] = useState(false)
+  const isSetup = mode === 'setup', isPasswordChange = mode === 'login' && resetMode
   const submit = async (event: FormEvent) => {
     event.preventDefault(); if (busy) return
     setError('')
-    if (isSetup && password !== confirmation) { setError('كلمتا المرور غير متطابقتين.'); return }
+    if ((isSetup || isPasswordChange) && password !== confirmation) { setError('كلمتا المرور غير متطابقتين.'); return }
     setBusy(true)
     try {
       if (isSetup) { await setupAdminAccount(email, password); onSetupComplete() }
+      else if (isPasswordChange) { await resetAdminAccountPassword(email, password); setPassword(''); setConfirmation(''); setResetMode(false); setError('تم تحديث كلمة المرور. يمكنك تسجيل الدخول الآن.') }
       else { const result = await loginAdmin(email, password); onAuthenticated(result.email) }
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'تعذر إكمال العملية.') }
+    } catch (cause) { const message = typeof (cause as { data?: unknown })?.data === 'string' ? (cause as { data: string }).data : cause instanceof Error ? cause.message : ''; setError(message.includes('غير صحيحة') ? 'البريد الإلكتروني أو كلمة المرور غير صحيحة.' : message.includes('10 أحرف') ? 'كلمة المرور يجب ألا تقل عن 10 أحرف.' : 'تعذر إكمال العملية. تحقق من الاتصال وحاول مجددًا.') }
     finally { setBusy(false) }
   }
-  return <AuthShell><div className="auth-heading"><span>{isSetup ? 'الإعداد الأول' : 'مرحبًا بعودتك'}</span><h1>{isSetup ? 'إنشاء حساب مدير' : 'تسجيل الدخول'}</h1><p>{isSetup ? 'أنشئ كلمة مرور جديدة وخاصة بهذه اللوحة. لا تستخدم كلمة مرور حساب Google أو GitHub.' : 'أدخل بيانات حساب المدير للوصول إلى العقارات والبنرات.'}</p></div>{isSetup && !canSetupAdmin ? <div className="auth-error">إنشاء الحساب متاح فقط من جهاز الإعداد المحلي.</div> : <form className="auth-form" onSubmit={submit}><label><span>البريد الإلكتروني</span><input dir="ltr" type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required/></label><label><span>كلمة المرور</span><input dir="ltr" type="password" autoComplete={isSetup ? 'new-password' : 'current-password'} value={password} onChange={(event) => setPassword(event.target.value)} minLength={10} required/></label>{isSetup && <label><span>تأكيد كلمة المرور</span><input dir="ltr" type="password" autoComplete="new-password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} minLength={10} required/></label>}{error && <div className="auth-error" role="alert">{error}</div>}<button className="primary-button" type="submit" disabled={busy}>{busy ? 'جاري الحفظ…' : isSetup ? 'إنشاء الحساب' : 'دخول آمن'}</button></form>}<p className="auth-note">الاتصال مشفّر، وكلمة المرور لا تُحفظ داخل ملفات الموقع.</p></AuthShell>
+  return <AuthShell><div className="auth-heading"><span>{isSetup ? 'الإعداد الأول' : isPasswordChange ? 'إعداد محلي آمن' : 'مرحبًا بعودتك'}</span><h1>{isSetup ? 'إنشاء حساب مدير' : isPasswordChange ? 'إعادة تعيين كلمة المرور' : 'تسجيل الدخول'}</h1><p>{isSetup || isPasswordChange ? 'أنشئ كلمة مرور جديدة وخاصة بهذه اللوحة. لا تستخدم كلمة مرور حساب Google أو GitHub.' : 'أدخل بيانات حساب المدير للوصول إلى العقارات والبنرات.'}</p></div>{(isSetup || isPasswordChange) && !canSetupAdmin ? <div className="auth-error">هذه العملية متاحة فقط من جهاز الإعداد المحلي.</div> : <form className="auth-form" onSubmit={submit}><label><span>البريد الإلكتروني</span><input dir="ltr" type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required/></label><label><span>{isPasswordChange ? 'كلمة المرور الجديدة' : 'كلمة المرور'}</span><input dir="ltr" type="password" autoComplete={isSetup || isPasswordChange ? 'new-password' : 'current-password'} value={password} onChange={(event) => setPassword(event.target.value)} minLength={10} required/></label>{(isSetup || isPasswordChange) && <label><span>تأكيد كلمة المرور</span><input dir="ltr" type="password" autoComplete="new-password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} minLength={10} required/></label>}{error && <div className={error.startsWith('تم ') ? 'auth-success' : 'auth-error'} role="alert">{error}</div>}<button className="primary-button" type="submit" disabled={busy}>{busy ? 'جاري الحفظ…' : isSetup ? 'إنشاء الحساب' : isPasswordChange ? 'تحديث كلمة المرور' : 'دخول آمن'}</button>{mode === 'login' && canSetupAdmin && <button className="auth-link" type="button" onClick={() => { setResetMode((current) => !current); setPassword(''); setConfirmation(''); setError('') }}>{isPasswordChange ? 'العودة إلى تسجيل الدخول' : 'إعادة تعيين كلمة المرور من هذا الجهاز'}</button>}</form>}<p className="auth-note">الاتصال مشفّر، وكلمة المرور لا تُحفظ داخل ملفات الموقع.</p></AuthShell>
 }
 
 function Dashboard({ properties, banners, onGo }: { properties: Property[]; banners: Banner[]; onGo: (tab: Tab) => void }) {

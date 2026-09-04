@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import { mutation, query } from './_generated/server'
 import type { MutationCtx, QueryCtx } from './_generated/server'
-import { v } from 'convex/values'
+import { ConvexError, v } from 'convex/values'
 
 const propertyData = {
   title: v.string(), location: v.string(), price: v.string(),
@@ -34,13 +34,13 @@ async function passwordHash(password: string, salt: string) {
 
 async function assertAdmin(adminToken: string) {
   const expectedHash = process.env.ADMIN_TOKEN_HASH
-  if (!expectedHash || await sha256(adminToken) !== expectedHash) throw new Error('غير مصرح بتنفيذ هذا الإجراء.')
+  if (!expectedHash || await sha256(adminToken) !== expectedHash) throw new ConvexError('غير مصرح بتنفيذ هذا الإجراء.')
 }
 
 async function assertSession(ctx: QueryCtx | MutationCtx, sessionToken: string) {
   const tokenHash = await sha256(sessionToken)
   const session = await ctx.db.query('adminSessions').withIndex('by_token_hash', (q) => q.eq('tokenHash', tokenHash)).unique()
-  if (!session || session.expiresAt <= Date.now()) throw new Error('انتهت جلسة الدخول. سجّل الدخول مرة أخرى.')
+  if (!session || session.expiresAt <= Date.now()) throw new ConvexError('انتهت جلسة الدخول. سجّل الدخول مرة أخرى.')
   return session.adminId
 }
 
@@ -67,10 +67,10 @@ export const setupAdmin = mutation({
   args: { adminToken: v.string(), email: v.string(), password: v.string() },
   handler: async (ctx, args) => {
     await assertAdmin(args.adminToken)
-    if (await ctx.db.query('admins').first()) throw new Error('تم تأسيس حساب الإدارة مسبقًا.')
+    if (await ctx.db.query('admins').first()) throw new ConvexError('تم تأسيس حساب الإدارة مسبقًا.')
     const email = args.email.trim().toLowerCase()
-    if (!email.includes('@')) throw new Error('عنوان البريد الإلكتروني غير صالح.')
-    if (args.password.length < 10) throw new Error('كلمة المرور يجب ألا تقل عن 10 أحرف.')
+    if (!email.includes('@')) throw new ConvexError('عنوان البريد الإلكتروني غير صالح.')
+    if (args.password.length < 10) throw new ConvexError('كلمة المرور يجب ألا تقل عن 10 أحرف.')
     const salt = randomHex(16)
     await ctx.db.insert('admins', { email, passwordSalt: salt, passwordHash: await passwordHash(args.password, salt), createdAt: Date.now() })
   },
@@ -80,12 +80,27 @@ export const login = mutation({
   handler: async (ctx, args) => {
     const email = args.email.trim().toLowerCase()
     const admin = await ctx.db.query('admins').withIndex('by_email', (q) => q.eq('email', email)).unique()
-    if (!admin || await passwordHash(args.password, admin.passwordSalt) !== admin.passwordHash) throw new Error('البريد الإلكتروني أو كلمة المرور غير صحيحة.')
+    if (!admin || await passwordHash(args.password, admin.passwordSalt) !== admin.passwordHash) throw new ConvexError('البريد الإلكتروني أو كلمة المرور غير صحيحة.')
     const token = randomHex(32)
     await ctx.db.insert('adminSessions', { adminId: admin._id, tokenHash: await sha256(token), expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000, createdAt: Date.now() })
     return { token, email: admin.email }
   },
 })
+export const resetAdminPassword = mutation({
+  args: { adminToken: v.string(), email: v.string(), password: v.string() },
+  handler: async (ctx, args) => {
+    await assertAdmin(args.adminToken)
+    if (args.password.length < 10) throw new ConvexError('كلمة المرور يجب ألا تقل عن 10 أحرف.')
+    const email = args.email.trim().toLowerCase()
+    const admin = await ctx.db.query('admins').withIndex('by_email', (q) => q.eq('email', email)).unique()
+    if (!admin) throw new ConvexError('حساب المدير غير موجود.')
+    const salt = randomHex(16)
+    await ctx.db.patch(admin._id, { passwordSalt: salt, passwordHash: await passwordHash(args.password, salt) })
+    const sessions = await ctx.db.query('adminSessions').collect()
+    await Promise.all(sessions.filter((session) => session.adminId === admin._id).map((session) => ctx.db.delete(session._id)))
+  },
+})
+
 export const logout = mutation({ args: { sessionToken: v.string() }, handler: async (ctx, args) => { const tokenHash = await sha256(args.sessionToken); const session = await ctx.db.query('adminSessions').withIndex('by_token_hash', (q) => q.eq('tokenHash', tokenHash)).unique(); if (session) await ctx.db.delete(session._id) } })
 
 export const getAdmin = query({ args: { sessionToken: v.string() }, handler: async (ctx, args) => { await assertSession(ctx, args.sessionToken); return getContent(ctx, true) } })

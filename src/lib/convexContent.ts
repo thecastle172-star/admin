@@ -50,6 +50,11 @@ export async function loginAdmin(email: string, password: string) {
   return result
 }
 
+export async function resetAdminAccountPassword(email: string, password: string) {
+  if (!setupToken) throw new Error('إعادة التعيين متاحة فقط من جهاز الإعداد المحلي.')
+  await requireClient().mutation(api.content.resetAdminPassword, { adminToken: setupToken, email, password })
+}
+
 export async function logoutAdmin() {
   const sessionToken = getStoredSession()
   clearStoredSession()
