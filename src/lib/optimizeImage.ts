@@ -68,12 +68,30 @@ export async function optimizeImage(file: File, presetName: ImagePreset): Promis
     blob = await canvasToBlob(canvas, quality)
   }
 
+  // Detailed photos can remain too large even at the minimum quality.
+  // Reduce dimensions as well, so the upload size limit is actually enforced.
+  while (blob.size > preset.targetBytes && Math.max(canvas.width, canvas.height) > 320) {
+    const resized = document.createElement('canvas')
+    resized.width = Math.max(1, Math.round(canvas.width * 0.8))
+    resized.height = Math.max(1, Math.round(canvas.height * 0.8))
+    const resizedContext = resized.getContext('2d', { alpha: false })
+    if (!resizedContext) throw new Error('تعذر تصغير الصورة إلى الحجم المطلوب.')
+    resizedContext.imageSmoothingEnabled = true
+    resizedContext.imageSmoothingQuality = 'high'
+    resizedContext.drawImage(canvas, 0, 0, resized.width, resized.height)
+    canvas.width = resized.width
+    canvas.height = resized.height
+    context.drawImage(resized, 0, 0)
+    blob = await canvasToBlob(canvas, quality)
+  }
+  if (blob.size > preset.targetBytes) throw new Error('تعذر ضغط الصورة إلى الحجم المسموح. اختر صورة أصغر.')
+
   const safeBase = file.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-|-$/g, '') || 'image'
   return {
     blob,
     dataUrl: await blobToDataUrl(blob),
-    width,
-    height,
+    width: canvas.width,
+    height: canvas.height,
     originalBytes: file.size,
     optimizedBytes: blob.size,
     fileName: `${safeBase}.webp`,

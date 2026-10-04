@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { formatBytes, optimizeImage } from './lib/optimizeImage'
 import type { ImagePreset, OptimizedImage } from './lib/optimizeImage'
-import { canSetupAdmin, clearStoredSession, deleteBannerRemote, deletePropertyRemote, deleteUploadedImageRemote, getAdminContent, getStoredSession, hasAdminAccount, isConvexReady, loginAdmin, logoutAdmin, resetAdminAccountPassword, saveBannerRemote, savePropertyRemote, saveSettingsRemote, setupAdminAccount, uploadOptimizedImage } from './lib/convexContent'
+import { canSetupAdmin, clearStoredSession, deleteBannerRemote, deletePropertyRemote, getAdminContent, getStoredSession, hasAdminAccount, isConvexReady, loginAdmin, logoutAdmin, resetAdminAccountPassword, saveBannerRemote, savePropertyRemote, saveSettingsRemote, setupAdminAccount, uploadOptimizedImage } from './lib/convexContent'
 import './App.css'
 
 type Tab = 'dashboard' | 'properties' | 'banners' | 'settings'
@@ -99,23 +99,31 @@ function AdminPanel({ adminEmail, onAuthExpired, onLogout }: { adminEmail: strin
   }
   const saveProperty = async (event: FormEvent) => {
     event.preventDefault(); if (!propertyForm || isSaving) return
-    const wasEditing = Boolean(propertyForm.id); let storageId: Awaited<ReturnType<typeof uploadOptimizedImage>> | undefined; setIsSaving(true)
+    const wasEditing = Boolean(propertyForm.id); let refreshFailed = false; setIsSaving(true)
     try {
-      if (isConvexReady) { storageId = imageInfo ? await uploadOptimizedImage(imageInfo.blob) : undefined; await savePropertyRemote(propertyForm, storageId); await refreshRemote() }
+      if (isConvexReady) {
+        const storageId = imageInfo ? await uploadOptimizedImage(imageInfo.blob) : undefined
+        await savePropertyRemote(propertyForm, storageId)
+        await refreshRemote().catch(() => { refreshFailed = true })
+      }
       else if (propertyForm.id) setProperties((items) => items.map((item) => item.id === propertyForm.id ? propertyForm as Property : item))
       else setProperties((items) => [{ ...propertyForm, id: Date.now() }, ...items])
-      setPropertyForm(null); setImageInfo(null); setToast(wasEditing ? 'تم تعديل العقار وحفظه' : 'تم رفع الصورة وإضافة العقار')
-    } catch (error) { if (storageId) void deleteUploadedImageRemote(storageId).catch(() => undefined); setToast(error instanceof Error ? error.message : 'تعذر حفظ العقار') } finally { setIsSaving(false) }
+      setPropertyForm(null); setImageInfo(null); setToast(refreshFailed ? 'تم حفظ العقار، لكن تعذر تحديث القائمة. أعد تحميل الصفحة.' : wasEditing ? 'تم تعديل العقار وحفظه' : 'تم رفع الصورة وإضافة العقار')
+    } catch (error) { setToast(error instanceof Error ? error.message : 'تعذر حفظ العقار') } finally { setIsSaving(false) }
   }
   const saveBanner = async (event: FormEvent) => {
     event.preventDefault(); if (!bannerForm || isSaving) return
-    const wasEditing = Boolean(bannerForm.id); let storageId: Awaited<ReturnType<typeof uploadOptimizedImage>> | undefined; setIsSaving(true)
+    const wasEditing = Boolean(bannerForm.id); let refreshFailed = false; setIsSaving(true)
     try {
-      if (isConvexReady) { storageId = imageInfo ? await uploadOptimizedImage(imageInfo.blob) : undefined; await saveBannerRemote(bannerForm, storageId); await refreshRemote() }
+      if (isConvexReady) {
+        const storageId = imageInfo ? await uploadOptimizedImage(imageInfo.blob) : undefined
+        await saveBannerRemote(bannerForm, storageId)
+        await refreshRemote().catch(() => { refreshFailed = true })
+      }
       else if (bannerForm.id) setBanners((items) => items.map((item) => item.id === bannerForm.id ? bannerForm as Banner : item))
       else setBanners((items) => [{ ...bannerForm, id: Date.now() }, ...items])
-      setBannerForm(null); setImageInfo(null); setToast(wasEditing ? 'تم تعديل البنر وحفظه' : 'تم رفع الصورة وإضافة البنر')
-    } catch (error) { if (storageId) void deleteUploadedImageRemote(storageId).catch(() => undefined); setToast(error instanceof Error ? error.message : 'تعذر حفظ البنر') } finally { setIsSaving(false) }
+      setBannerForm(null); setImageInfo(null); setToast(refreshFailed ? 'تم حفظ البنر، لكن تعذر تحديث القائمة. أعد تحميل الصفحة.' : wasEditing ? 'تم تعديل البنر وحفظه' : 'تم رفع الصورة وإضافة البنر')
+    } catch (error) { setToast(error instanceof Error ? error.message : 'تعذر حفظ البنر') } finally { setIsSaving(false) }
   }
   const chooseImage = async (event: ChangeEvent<HTMLInputElement>, preset: ImagePreset) => {
     const file = event.target.files?.[0]
